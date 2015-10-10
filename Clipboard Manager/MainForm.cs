@@ -1,48 +1,62 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
-using System.Drawing;
-using System.Text;
+using System.Data.Common;
 using System.Windows.Forms;
 using System.Threading;
-using System.IO;
-using Microsoft.Win32;
+using System.Data.SQLite;
 
 namespace ClipMng
 {
+    
     public partial class MainForm : Form
     {
-        public String Last = "";
-        
+        private Thread tChecker = null;
+        private String Last = null;
+        private SQLiteConnection conn = new SQLiteConnection("Data Source=History.db;");
+
         public MainForm()
         {
+            conn.Open();
+           
             InitializeComponent();
-            TT.Start();
-        }
 
-        private void checkBox3_CheckedChanged(object sender, EventArgs e)
-        {
-            RegistryKey key;
-
-            if (!TWinAutoRun.Checked)
+            if (conn.State == ConnectionState.Open)
             {
-                key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-                key.DeleteValue("Clipboard Manager");
-                key.Close();
+                SQLiteCommand cmd = new SQLiteCommand("CREATE TABLE IF NOT EXISTS History (Text, Time)", conn);
+                cmd.ExecuteNonQuery();
+                SQLiteCommand command = new SQLiteCommand("SELECT * FROM History;", conn);
+                SQLiteDataReader reader = command.ExecuteReader();
+                foreach (DbDataRecord record in reader)
+                {
+                    ListViewItem Item = new ListViewItem(record["Text"].ToString());
+                    Item.SubItems.Add(record["Time"].ToString());
+                    TMainList.Items.Add(Item);
+                    Last = record["Text"].ToString();
+                }
             }
-            else
-            {
-                key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-                key.SetValue("Clipboard Manager", Application.ExecutablePath);
-                key.Close();
-            }   
+
+            tChecker = new Thread(TClipboardChecker);
+            tChecker.SetApartmentState(ApartmentState.STA);
+            tChecker.Start();
         }
 
-        private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-        {
-            OpenBrowser("http://mediclab.org");
-        }
+        //private void checkBox3_CheckedChanged(object sender, EventArgs e)
+        //{
+        //    RegistryKey key;
+
+        //    if (!TWinAutoRun.Checked)
+        //    {
+        //        key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        //        key.DeleteValue("Clipboard Manager");
+        //        key.Close();
+        //    }
+        //    else
+        //    {
+        //        key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        //        key.SetValue("Clipboard Manager", Application.ExecutablePath);
+        //        key.Close();
+        //    }   
+        //}
 
         private void показатьToolStripMenuItem1_Click(object sender, EventArgs e)
         {
@@ -61,26 +75,6 @@ namespace ClipMng
             TMainList.Items.RemoveAt(TMainList.SelectedItems[0].Index);
         }
 
-        private void facebook_Click(object sender, EventArgs e)
-        {
-            OpenBrowser("http://www.facebook.com/profile.php?id=100001124670058");
-        }
-
-        private void googleplus_Click(object sender, EventArgs e)
-        {
-            OpenBrowser("https://plus.google.com/u/0/116041127872162226481/posts");
-        }
-
-        private void vkontakte_Click(object sender, EventArgs e)
-        {
-            OpenBrowser("http://vkontakte.ru/id14833332");
-        }
-
-        private void twitter_Click(object sender, EventArgs e)
-        {
-            OpenBrowser("https://twitter.com/#!/Med1c84");
-        }
-
         public void OpenBrowser(String adress)
         {
             System.Diagnostics.Process p = new System.Diagnostics.Process();
@@ -89,46 +83,43 @@ namespace ClipMng
             p.Start();
         }
 
-        private void timer1_Tick(object sender, EventArgs e)
+        private void TClipboardChecker()
         {
-            String New = "", Time = "";
-            String path = Application.StartupPath + "\\log.txt";
-            StreamWriter hOpen;
+            String New = null, Time = null;
 
-            if (checkBox1.Checked)
+            while (true)
             {
-                if (!File.Exists(path)) File.CreateText(path);
-            }
-            try
-            {
-                New = Clipboard.GetText();
-                Time = System.DateTime.Now.ToString();
-            }
-            catch (ObjectDisposedException d) { d.ToString(); }
+               New = Clipboard.GetText();
+               Time = DateTime.Now.ToString();
 
-            if (Last != New)
-            {
-                ListViewItem listItem = new ListViewItem(New);
-                listItem.SubItems.Add(Time);
-                TMainList.Items.Add(listItem);
-                hOpen = File.AppendText(path);
-                if (checkBox1.Checked) hOpen.WriteLine(Time + "\t" + New + "\n");
-                hOpen.Close();
-                hOpen.Dispose();
+                TMainList.Invoke((MethodInvoker)delegate
+                {
+                    if (New != null && Time != null && Last != New)
+                    {
+                        ListViewItem newItem = new ListViewItem(New);
+                        newItem.SubItems.Add(Time);
+                        if (слежениеЗаБуферомToolStripMenuItem.Checked)
+                        {
+                            SQLiteCommand cmd = new SQLiteCommand(String.Format("INSERT INTO History values (\"{0}\", \"{1}\")",New.Replace("\"","\"\""),Time), conn);
+                            cmd.ExecuteNonQuery();
+                            TMainList.Items.Add(newItem);
+                        }
+                    }
+                });
                 Last = New;
-             }  
+                Thread.Sleep(250);
+            }
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            String path = Application.StartupPath + "\\log.txt";
-            
-            File.Delete(path);
+            tChecker.Abort();
+            conn.Dispose();
+        }
 
-            if (checkBox1.Checked)
-            {
-                if (!File.Exists(path)) File.CreateText(path);
-            }
+        private void слежениеЗаБуферомToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+
         }
     }
 }
